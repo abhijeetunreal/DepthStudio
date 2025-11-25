@@ -36,22 +36,34 @@ Write-Host 'Upgrading pip/tools...' -ForegroundColor Cyan
 function Run-ProcessWithTail($exe, $argList, $title) {
     $log = [IO.Path]::GetTempFileName()
     Write-Host "`n$title -> $exe $argList" -ForegroundColor Cyan
-    $startInfo = @{ FilePath = $exe; ArgumentList = $argList; RedirectStandardOutput = $log; RedirectStandardError = $log; NoNewWindow = $true; WindowStyle = 'Hidden' }
-    $proc = Start-Process @startInfo -PassThru
+    $exitCode = 0
+    try {
+        $startInfo = @{ FilePath = $exe; ArgumentList = $argList; RedirectStandardOutput = $log; RedirectStandardError = $log; NoNewWindow = $true }
+        $proc = Start-Process @startInfo -PassThru
 
-    $spinner = @('|','/','-','\')
-    $idx = 0
-    while (-not $proc.HasExited) {
-        $ch = $spinner[$idx % $spinner.Length]
-        Write-Host -NoNewline "`r[$ch] $title... "
-        Start-Sleep -Milliseconds 300
-        $idx++
+        $spinner = @('|','/','-','\')
+        $idx = 0
+        while (-not $proc.HasExited) {
+            $ch = $spinner[$idx % $spinner.Length]
+            Write-Host -NoNewline "`r[$ch] $title... "
+            Start-Sleep -Milliseconds 300
+            $idx++
+        }
+        Write-Host "`r[✓] $title completed." -ForegroundColor Green
+        Get-Content $log -Tail 30 | ForEach-Object { Write-Host "  $_" }
+        $exitCode = $proc.ExitCode
+    } catch {
+        Write-Warning "Start-Process with redirected output failed; falling back to synchronous execution. Error: $($_.Exception.Message)"
+        # Fallback: run via cmd.exe and redirect output to the log file. This will run synchronously.
+        $cmd = "`"$exe`" $argList > `"$log`" 2>&1"
+        & cmd.exe /c $cmd
+        $exitCode = $LASTEXITCODE
+        Write-Host "[✓] $title completed (fallback)." -ForegroundColor Green
+        Get-Content $log -Tail 30 | ForEach-Object { Write-Host "  $_" }
+    } finally {
+        Remove-Item $log -ErrorAction SilentlyContinue
     }
-    Write-Host "`r[✓] $title completed." -ForegroundColor Green
-    Write-Host "--- Last output ---"
-    Get-Content $log -Tail 30 | ForEach-Object { Write-Host "  $_" }
-    Remove-Item $log -ErrorAction SilentlyContinue
-    return $proc.ExitCode
+    return $exitCode
 }
 
 # Upgrade pip/tools using the active python
