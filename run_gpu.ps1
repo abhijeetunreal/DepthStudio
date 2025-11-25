@@ -39,6 +39,15 @@ $activate = Join-Path $venvPath 'Scripts\Activate.ps1'
 if (-not (Test-Path $activate)) { Write-Error 'Activation script not found in venv.'; exit 1 }
 . $activate
 
+# Ensure we use the venv python executable for all subsequent operations
+$venvPython = Join-Path $venvPath 'Scripts\python.exe'
+if (Test-Path $venvPython) {
+    $python = $venvPython
+    Write-Host "Using venv python: $python"
+} else {
+    Write-Warning "Venv python not found at $venvPython — continuing with detected python: $python"
+}
+
 Write-Host 'Upgrading pip/tools...' -ForegroundColor Cyan
 # Helper: run a process and tail its output while showing a spinner
 function Run-ProcessWithTail($exe, $argList, $title) {
