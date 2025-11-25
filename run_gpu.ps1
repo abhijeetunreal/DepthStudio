@@ -113,7 +113,16 @@ Write-Host 'Installing Python packages (this can take several minutes)...' -Fore
 if (-not $isDry) {
     # Use the venv's python to run pip so output streams reliably
     $rc = Run-ProcessWithTail $python "-m pip install -r `"$reqFile`"" 'pip install requirements'
-    if ($rc -ne 0) { Write-Warning "pip install returned exit code $rc" }
+    if ($rc -ne 0) {
+        Write-Warning "pip install returned exit code $rc — attempting per-package installs"
+        # Read requirements and try installing packages one by one to surface specific failures
+        $reqs = Get-Content $reqFile | Where-Object { $_ -and -not $_.StartsWith('#') } | ForEach-Object { $_.Trim() }
+        foreach ($pkg in $reqs) {
+            Write-Host "Installing individual package: $pkg" -ForegroundColor Cyan
+            $r2 = Run-ProcessWithTail $python "-m pip install --upgrade $pkg" "install $pkg"
+            if ($r2 -ne 0) { Write-Warning "Package $pkg failed to install (exit $r2)" }
+        }
+    }
 } else {
     Write-Host "DRY RUN: would run: $python -m pip install -r `"$reqFile`"" -ForegroundColor Yellow
 }
@@ -142,20 +151,25 @@ if ($hasGPU) {
  $modelUrl = 'https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx'
  $modelPath = Join-Path $projDir 'depth_anything_v2_small_f32.onnx'
  if (-not (Test-Path $modelPath)) {
-     if (-not $isDry) {
-         Write-Host 'Downloading Depth Anything model (~200MB)...' -ForegroundColor Cyan
-        try {
-            # Use WebClient to show progress
-            $wc = New-Object System.Net.WebClient
-            $done = $false
-            $wc.DownloadProgressChanged += { param($s,$e) Write-Host -NoNewline "`rDownloading model: $($e.ProgressPercentage)% ($([math]::Round($e.BytesReceived/1KB)) KB)" }
-            $wc.DownloadFileCompleted += { $done = $true; Write-Host "`nDownload complete." }
-            $uri = [System.Uri]::new($modelUrl)
-            $wc.DownloadFileAsync($uri, $modelPath)
-            while (-not $done) { Start-Sleep -Milliseconds 200 }
-        } catch {
-            Write-Warning "Model download failed: $($_.Exception.Message)"
-        }
+    if (-not $isDry) {
+        Write-Host 'Downloading Depth Anything model (~200MB)...' -ForegroundColor Cyan
+       try {
+           # Try WebClient with progress events; if not supported, fallback to Invoke-WebRequest
+           try {
+               $wc = New-Object System.Net.WebClient
+               $done = $false
+               $wc.DownloadProgressChanged += { param($s,$e) Write-Host -NoNewline "`rDownloading model: $($e.ProgressPercentage)% ($([math]::Round($e.BytesReceived/1KB)) KB)" }
+               $wc.DownloadFileCompleted += { $done = $true; Write-Host "`nDownload complete." }
+               $uri = [System.Uri]::new($modelUrl)
+               $wc.DownloadFileAsync($uri, $modelPath)
+               while (-not $done) { Start-Sleep -Milliseconds 200 }
+           } catch {
+               Write-Host 'WebClient progress unavailable; using Invoke-WebRequest fallback...' -ForegroundColor Yellow
+               Invoke-WebRequest -Uri $modelUrl -OutFile $modelPath -UseBasicParsing
+           }
+       } catch {
+           Write-Warning "Model download failed: $($_.Exception.Message)"
+       }
      } else {
          Write-Host "DRY RUN: would download model from: $modelUrl to: $modelPath" -ForegroundColor Yellow
      }
@@ -193,7 +207,18 @@ if ($missing.Count -gt 0) {
         Write-Host 'Attempting to install onnxruntime (CPU) as fallback...' -ForegroundColor Cyan
         if (-not $isDry) { Run-ProcessWithTail $python "-m pip install --upgrade onnxruntime" 'install onnxruntime' }
     }
-    if ($missing -contains 'PIL') { Write-Host 'Pillow missing. It should have been installed; try: pip install pillow' -ForegroundColor Yellow }
+    if ($missing -contains 'PIL') {
+        Write-Host 'Pillow missing — attempting to install...' -ForegroundColor Cyan
+        if (-not $isDry) { $r = Run-ProcessWithTail $python "-m pip install --upgrade pillow" 'install pillow'; if ($r -ne 0) { Write-Warning 'pillow install failed' } }
+    }
+    if ($missing -contains 'requests') {
+        Write-Host 'requests missing — attempting to install...' -ForegroundColor Cyan
+        if (-not $isDry) { $r = Run-ProcessWithTail $python "-m pip install --upgrade requests" 'install requests'; if ($r -ne 0) { Write-Warning 'requests install failed' } }
+    }
+    # Re-run verification for any remaining missing modules
+    $stillMissing = @()
+    foreach ($m in $checks) { if (-not (Test-Import $m)) { $stillMissing += $m } }
+    if ($stillMissing.Count -gt 0) { Write-Warning "Still missing modules after attempts: $($stillMissing -join ', ')" }
 }
 
 # Final message and launch
