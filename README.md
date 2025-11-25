@@ -1,10 +1,4 @@
-# Depth Studio (Depth Anything) — Project README
-
-**Project**: Depth Studio — Depth estimation demo using the "Depth Anything" ONNX model with optional GPU acceleration.
-
-**Location**: `x:/cricketProject/DepthAnything`
-
----
+# Depth Studio (Depth Anything)
 
 **Contents**
 - Overview
@@ -176,6 +170,3 @@ Credits & license
 - MediaPipe is used for pose detection.
 - This repository contains glue code and UI scaffolding. Check licenses of upstream components before redistributing.
 
----
-
-If you want, I can also add a short `USAGE.md` with screenshots and sample outputs, or create a small test harness to measure FPS and inference times. Which would you prefer next?
