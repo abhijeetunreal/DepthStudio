@@ -1,6 +1,9 @@
 import cv2
 import numpy as np
-import mediapipe as mp
+try:
+    import mediapipe as mp
+except Exception:
+    mp = None
 import onnxruntime as ort
 import os
 import requests
@@ -68,6 +71,11 @@ class UnifiedDepthApp:
         self.root.mainloop()
 
     def init_mediapipe(self):
+        if mp is None:
+            self.mp_pose = None
+            self.pose = None
+            print("MediaPipe not available — pose tracking disabled.")
+            return
         self.mp_pose = mp.solutions.pose
         self.pose = self.mp_pose.Pose(min_detection_confidence=0.5)
 
@@ -266,18 +274,19 @@ class UnifiedDepthApp:
                         cv2.rectangle(display_frame, (rx, ry), (rx+rw, ry+rh), (255, 150, 0), 2)
                         cv2.putText(display_frame, f"REF: {self.ref_real_dist}m", (rx, ry-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,150,0), 1)
 
-                # 3. Head Tracking
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                pose = self.pose.process(rgb)
-                if pose.pose_landmarks:
-                    lm = pose.pose_landmarks.landmark[0]
-                    nx, ny = int(lm.x * w), int(lm.y * h)
-                    if 0 <= nx < w and 0 <= ny < h:
-                        user_raw = depth_map[ny, nx] + 0.01
-                        user_dist = current_k / user_raw
-                        color = (0, 255, 0) if self.calibration_mode == "REFERENCE" else (0, 100, 255)
-                        cv2.circle(display_frame, (nx, ny), 8, color, -1)
-                        cv2.putText(display_frame, f"{user_dist:.2f} m", (nx+15, ny), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+                # 3. Head Tracking (optional)
+                if self.pose is not None:
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    results = self.pose.process(rgb)
+                    if results and results.pose_landmarks:
+                        lm = results.pose_landmarks.landmark[0]
+                        nx, ny = int(lm.x * w), int(lm.y * h)
+                        if 0 <= nx < w and 0 <= ny < h:
+                            user_raw = depth_map[ny, nx] + 0.01
+                            user_dist = current_k / user_raw
+                            color = (0, 255, 0) if self.calibration_mode == "REFERENCE" else (0, 100, 255)
+                            cv2.circle(display_frame, (nx, ny), 8, color, -1)
+                            cv2.putText(display_frame, f"{user_dist:.2f} m", (nx+15, ny), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
                 
                 if self.show_pip.get():
                     d_norm = (depth_map - depth_map.min()) / (depth_map.max() - depth_map.min() + 1e-6)
